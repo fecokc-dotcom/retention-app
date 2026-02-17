@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retention - Your Mental Gym</title>
+    <!--
+    IMPORTANT SETUP NOTES:
+    
+    This app now fetches article content automatically and generates real quiz questions!
+    
+    HOW IT WORKS:
+    1. When you add an article URL, it uses Jina Reader API (free, no auth) to fetch the content
+    2. When you start a quiz, it sends the article content to Claude API to generate questions
+    
+    CLAUDE API SETUP:
+    - The Claude API calls will work in claude.ai artifacts (no setup needed!)
+    - If running standalone, you'll need to add authentication
+    - For now, if API fails, it falls back to generic questions
+    
+    FEATURES:
+    ✓ Auto-fetches article content from URLs
+    ✓ Generates content-specific quiz questions via Claude
+    ✓ Fallback to generic questions if API unavailable
+    ✓ Works with manual text paste too
+    -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Lucide Icons as simple SVG components
+        const Calendar = ({ size = 24, className = "" }) => (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+        );
+
+        const BookOpen = ({ size = 24, className = "" }) => (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+          </svg>
+        );
+
+        const FileText = ({ size = 24, className = "" }) => (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+        );
+
+        const Trophy = ({ size = 24, className = "" }) => (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+            <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+            <path d="M4 22h16"/>
+            <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+            <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+            <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+          </svg>
+        );
+
+        const Flame = ({ size = 24, className = "" }) => (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+          </svg>
+        );
+
+        const Target = ({ size = 24, className = "" }) => (
+          <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+          </svg>
+        );
+
+        // Main App Component
+        const RetentionApp = () => {
+          const [view, setView] = useState('home');
+          const [books, setBooks] = useState([]);
+          const [articles, setArticles] = useState([]);
+          const [currentQuiz, setCurrentQuiz] = useState(null);
+          const [streak, setStreak] = useState(0);
+          const [lastQuizDate, setLastQuizDate] = useState(null);
+          const [score, setScore] = useState(0);
+          const [quizHistory, setQuizHistory] = useState([]);
+
+          // Load data from localStorage
+          useEffect(() => {
+            const savedBooks = localStorage.getItem('retentionBooks');
+            const savedArticles = localStorage.getItem('retentionArticles');
+            const savedStreak = localStorage.getItem('streak');
+            const savedLastQuiz = localStorage.getItem('lastQuizDate');
+            const savedScore = localStorage.getItem('totalScore');
+            const savedHistory = localStorage.getItem('quizHistory');
+
+            if (savedBooks) setBooks(JSON.parse(savedBooks));
+            if (savedArticles) setArticles(JSON.parse(savedArticles));
+            if (savedStreak) setStreak(parseInt(savedStreak));
+            if (savedLastQuiz) setLastQuizDate(savedLastQuiz);
+            if (savedScore) setScore(parseInt(savedScore));
+            if (savedHistory) setQuizHistory(JSON.parse(savedHistory));
+          }, []);
+
+          // Save to localStorage
+          useEffect(() => { localStorage.setItem('retentionBooks', JSON.stringify(books)); }, [books]);
+          useEffect(() => { localStorage.setItem('retentionArticles', JSON.stringify(articles)); }, [articles]);
+          useEffect(() => { localStorage.setItem('streak', streak.toString()); }, [streak]);
+          useEffect(() => { if (lastQuizDate) localStorage.setItem('lastQuizDate', lastQuizDate); }, [lastQuizDate]);
+          useEffect(() => { localStorage.setItem('totalScore', score.toString()); }, [score]);
+          useEffect(() => { localStorage.setItem('quizHistory', JSON.stringify(quizHistory)); }, [quizHistory]);
+
+          // ─── QUIZ GENERATION ──────────────────────────────────────────────────────
+          // The core of the app. We send the actual article/chapter text to Claude
+          // via a CORS proxy (corsproxy.io) which forwards the request server-side,
+          // bypassing the browser's same-origin restriction on local HTML files.
+
+          const callClaude = async (articleText, contentTitle) => {
+            // Trim to 6000 chars — enough for any article, stays within token limits
+            const trimmed = articleText.substring(0, 6000);
+
+            const prompt = `You are a reading comprehension quiz generator. 
+Read the following content carefully and write 5 multiple-choice questions that test whether someone actually read and understood it.
+
+STRICT RULES:
+- Every question MUST reference specific facts, names, numbers, arguments, or concepts from the text below.
+- Do NOT ask vague questions like "what is the main theme" or "how did this make you feel".
+- Do NOT use placeholder options like "Option A". Write real, specific, plausible-sounding wrong answers.
+- The correct answer should require having actually read the content to get right.
+- Vary the question types: some about specific facts, some about cause-and-effect, some about the author's argument.
+
+CONTENT TITLE: ${contentTitle}
+
+CONTENT:
+${trimmed}
+
+Return ONLY a raw JSON array, no markdown, no explanation, no code fences. Format:
+[
+  {
+    "question": "...",
+    "options": ["...", "...", "...", "..."],
+    "correct": 0,
+    "explanation": "..."
+  }
+]`;
+
+            // Route through corsproxy.io to avoid CORS errors on local HTML files
+            const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent('https://api.anthropic.com/v1/messages');
+
+            const response = await fetch(proxyUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'claude-opus-4-5-20251101',
+                max_tokens: 1500,
+                messages: [{ role: 'user', content: prompt }]
+              })
+            });
+
+            if (!response.ok) {
+              const err = await response.text();
+              throw new Error(`API error ${response.status}: ${err.substring(0, 200)}`);
+            }
+
+            const data = await response.json();
+            const raw = data.content?.find(c => c.type === 'text')?.text || '';
+
+            // Strip any accidental markdown fences before parsing
+            const clean = raw.replace(/```json|```/g, '').trim();
+            const jsonMatch = clean.match(/\[[\s\S]*\]/);
+            if (!jsonMatch) throw new Error('No JSON array found in Claude response');
+
+            const questions = JSON.parse(jsonMatch[0]);
+            if (!Array.isArray(questions) || questions.length === 0) throw new Error('Empty questions array');
+            return questions.slice(0, 5);
+          };
+
+          const generateQuiz = async (content) => {
+            const textSource = content.type === 'book'
+              ? content.currentChapter?.summary
+              : content.text;
+
+            const titleForPrompt = content.type === 'book'
+              ? `${content.title} — ${content.currentChapter?.title || 'Chapter'}`
+              : content.title;
+
+            // Guard: make sure we actually have content to quiz on
+            if (!textSource || textSource.trim().length < 80) {
+              alert('⚠️ Not enough content to generate questions from. For articles, make sure text was fetched or pasted. For books, chapter summaries need to be available.');
+              return null;
+            }
+
+            try {
+              console.log(`Calling Claude API for: "${titleForPrompt}" (${textSource.length} chars)`);
+              const questions = await callClaude(textSource, titleForPrompt);
+              console.log('✅ Questions generated successfully:', questions.length);
+              return {
+                ...content,
+                questions,
+                currentQuestion: 0,
+                correctAnswers: 0,
+                userAnswers: [],
+                usingFallback: false
+              };
+            } catch (err) {
+              console.error('Claude API failed:', err.message);
+              alert(`⚠️ Could not generate questions (${err.message}). Check your connection and try again.`);
+              return null;
+            }
+          };
+
+          const startDailyQuiz = async () => {
+            const allContent = [
+              ...books.map(b => ({ ...b, type: 'book' })),
+              ...articles.map(a => ({ ...a, type: 'article' }))
+            ];
+
+            if (allContent.length === 0) {
+              alert('Add some books or articles first!');
+              return;
+            }
+
+            allContent.sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded));
+            setView('loading');
+            const quiz = await generateQuiz(allContent[0]);
+            if (quiz) { setCurrentQuiz(quiz); setView('quiz'); }
+            else setView('home');
+          };
+
+          const startQuizForContent = async (content) => {
+            setView('loading');
+            const quiz = await generateQuiz(content);
+            if (quiz) { setCurrentQuiz(quiz); setView('quiz'); }
+            else setView('home');
+          };
+
+          const submitAnswer = (answerIndex) => {
+            const isCorrect = answerIndex === currentQuiz.questions[currentQuiz.currentQuestion].correct;
+            
+            const updatedQuiz = {
+              ...currentQuiz,
+              userAnswers: [...currentQuiz.userAnswers, answerIndex],
+              correctAnswers: currentQuiz.correctAnswers + (isCorrect ? 1 : 0)
+            };
+
+            if (currentQuiz.currentQuestion < currentQuiz.questions.length - 1) {
+              updatedQuiz.currentQuestion = currentQuiz.currentQuestion + 1;
+              setCurrentQuiz(updatedQuiz);
+            } else {
+              completeQuiz(updatedQuiz);
+            }
+          };
+
+          const completeQuiz = (quiz) => {
+            const percentCorrect = Math.round((quiz.correctAnswers / quiz.questions.length) * 100);
+            const pointsEarned = quiz.correctAnswers * 10;
+
+            const today = new Date().toDateString();
+            const yesterday = new Date(Date.now() - 86400000).toDateString();
+            
+            let newStreak = streak;
+            if (lastQuizDate === yesterday || !lastQuizDate) {
+              newStreak = streak + 1;
+            } else if (lastQuizDate !== today) {
+              newStreak = 1;
+            }
+
+            setStreak(newStreak);
+            setLastQuizDate(today);
+            setScore(score + pointsEarned);
+
+            const historyEntry = {
+              date: today,
+              title: quiz.title,
+              type: quiz.type,
+              score: percentCorrect,
+              correct: quiz.correctAnswers,
+              total: quiz.questions.length
+            };
+            setQuizHistory([historyEntry, ...quizHistory.slice(0, 29)]);
+            setCurrentQuiz({ ...quiz, completed: true, percentCorrect, pointsEarned });
+          };
+
+          const addBook = (bookData) => {
+            setBooks([...books, { ...bookData, id: Date.now(), dateAdded: new Date().toISOString() }]);
+          };
+
+          const addArticle = (articleData) => {
+            setArticles([...articles, { ...articleData, id: Date.now(), dateAdded: new Date().toISOString() }]);
+          };
+
+          // Home View
+          const HomeView = () => (
+            <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-6">
+              <div className="max-w-2xl mx-auto">
+                <div className="text-center mb-8">
+                  <h1 className="text-4xl font-bold text-gray-800 mb-2">Retention</h1>
+                  <p className="text-gray-600">Your mental gym for what you consume</p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 mb-8">
+                  <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <Flame className="text-orange-500" size={24} />
+                      <span className="text-2xl font-bold text-gray-800">{streak}</span>
+                    </div>
+                    <p className="text-sm text-gray-600">Day Streak</p>
+                  </div>
+                  
+                  <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <Trophy className="text-yellow-500" size={24} />
+                      <span className="text-2xl font-bold text-gray-800">{score}</span>
+                    </div>
+                    <p className="text-sm text-gray-600">Total Points</p>
+                  </div>
+                  
+                  <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <Target className="text-green-500" size={24} />
+                      <span className="text-2xl font-bold text-gray-800">{quizHistory.length}</span>
+                    </div>
+                    <p className="text-sm text-gray-600">Quizzes Done</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={startDailyQuiz}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl p-6 mb-6 shadow-lg hover:shadow-xl transition-all"
+                >
+                  <div className="flex items-center justify-center gap-3">
+                    <Calendar size={28} />
+                    <div className="text-left">
+                      <p className="text-xl font-bold">Quiz Most Recent Content</p>
+                      <p className="text-sm text-indigo-100">5 questions • ~3 minutes</p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Recent Content List */}
+                {(books.length > 0 || articles.length > 0) && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4">Your Content</h3>
+                    
+                    {/* Books with chapter checkboxes */}
+                    {books.map(book => (
+                      <div key={book.id} className="mb-6 pb-6 border-b border-gray-200 last:border-0">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <BookOpen className="text-indigo-600" size={20} />
+                            <div>
+                              <p className="font-bold text-gray-800">{book.title}</p>
+                              {book.author && <p className="text-xs text-gray-600">by {book.author}</p>}
+                              <p className="text-xs text-gray-600">
+                                {book.completedChapters.length} / {book.chapters.length} chapters complete
+                              </p>
+                            </div>
+                          </div>
+                          {book.completedChapters.length > 0 && (
+                            <button
+                              onClick={() => {
+                                // Quiz on most recent completed chapter
+                                const lastChapterNum = Math.max(...book.completedChapters);
+                                const chapter = book.chapters.find(c => c.number === lastChapterNum);
+                                startQuizForContent({
+                                  ...book,
+                                  type: 'book',
+                                  currentChapter: chapter
+                                });
+                              }}
+                              className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700"
+                            >
+                              Quiz Me
+                            </button>
+                          )}
+                        </div>
+                        
+                        {/* Chapter checkboxes */}
+                        <div className="grid grid-cols-2 gap-2 ml-7">
+                          {book.chapters.slice(0, 12).map(chapter => (
+                            <label
+                              key={chapter.number}
+                              className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={book.completedChapters.includes(chapter.number)}
+                                onChange={async (e) => {
+                                  if (e.target.checked) {
+                                    // Prompt for quick summary when completing chapter
+                                    const summary = prompt(
+                                      `Quick! What were the main points of "${chapter.title}"?\n\n` +
+                                      `Write 2-3 sentences (this helps retention AND creates better quiz questions!):`
+                                    );
+                                    
+                                    if (summary && summary.length > 20) {
+                                      const updatedBooks = books.map(b => {
+                                        if (b.id === book.id) {
+                                          const updatedChapters = b.chapters.map(c => 
+                                            c.number === chapter.number 
+                                              ? { ...c, summary: summary }
+                                              : c
+                                          );
+                                          return {
+                                            ...b,
+                                            chapters: updatedChapters,
+                                            completedChapters: [...b.completedChapters, chapter.number].sort((a,b) => a-b)
+                                          };
+                                        }
+                                        return b;
+                                      });
+                                      setBooks(updatedBooks);
+                                    } else if (!summary) {
+                                      // User cancelled - don't check the box
+                                      e.target.checked = false;
+                                    } else {
+                                      alert('Summary too short! Try again with at least 2-3 sentences.');
+                                      e.target.checked = false;
+                                    }
+                                  } else {
+                                    // Unchecking - just remove from completed
+                                    const updatedBooks = books.map(b => {
+                                      if (b.id === book.id) {
+                                        return {
+                                          ...b,
+                                          completedChapters: b.completedChapters.filter(n => n !== chapter.number)
+                                        };
+                                      }
+                                      return b;
+                                    });
+                                    setBooks(updatedBooks);
+                                  }
+                                }}
+                                className="w-4 h-4 text-indigo-600 rounded"
+                              />
+                              <span className="text-sm text-gray-700 truncate">
+                                {chapter.title || `Chapter ${chapter.number}`}
+                              </span>
+                            </label>
+                          ))}
+                          {book.chapters.length > 12 && (
+                            <p className="text-xs text-gray-500 col-span-2 mt-2">
+                              + {book.chapters.length - 12} more chapters
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {/* Articles */}
+                    <div className="space-y-3">
+                      {articles
+                        .sort((a, b) => new Date(b.dateAdded) - new Date(a.dateAdded))
+                        .slice(0, 5)
+                        .map((item, index) => (
+                          <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-all">
+                            <div className="flex items-center gap-3 flex-1">
+                              <FileText className="text-blue-600 flex-shrink-0" size={20} />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold text-gray-800 truncate">{item.title}</p>
+                                <p className="text-xs text-gray-600">
+                                  {item.source}
+                                  {index === 0 && <span className="ml-2 text-green-600 font-semibold">• Most Recent</span>}
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => startQuizForContent(item)}
+                              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-all flex-shrink-0"
+                            >
+                              Quiz Me
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <BookOpen className="text-indigo-600" size={20} />
+                      <p className="font-semibold text-gray-800">Books</p>
+                    </div>
+                    <p className="text-2xl font-bold text-gray-800">{books.length}</p>
+                    <p className="text-sm text-gray-600">in your library</p>
+                  </div>
+                  
+                  <div className="bg-white rounded-xl p-4 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText className="text-blue-600" size={20} />
+                      <p className="font-semibold text-gray-800">Articles</p>
+                    </div>
+                    <p className="text-2xl font-bold text-gray-800">{articles.length}</p>
+                    <p className="text-sm text-gray-600">read recently</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <button
+                    onClick={() => setView('addContent')}
+                    className="w-full bg-white text-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md transition-all font-semibold"
+                  >
+                    + Add Content to Track
+                  </button>
+                  
+                  <button
+                    onClick={() => setView('stats')}
+                    className="w-full bg-white text-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md transition-all font-semibold"
+                  >
+                    View Progress & History
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+
+          // Add Content View
+          const AddContentView = () => {
+            const [contentType, setContentType] = useState('book');
+            const [bookTitle, setBookTitle] = useState('');
+            const [bookChapter, setBookChapter] = useState('10'); // Default to 10 chapters if can't fetch
+            const [articleTitle, setArticleTitle] = useState('');
+            const [articleUrl, setArticleUrl] = useState('');
+            const [articleText, setArticleText] = useState('');
+
+            const handleAddBook = async () => {
+              if (!bookTitle) {
+                alert('Please enter a book title');
+                return;
+              }
+
+              const addButton = document.querySelector('button.add-book-btn');
+              const originalText = addButton ? addButton.textContent : '';
+              if (addButton) addButton.textContent = 'Fetching book info...';
+
+              try {
+                // Try to fetch book chapter info from Wikipedia
+                const bookInfo = await fetchBookChapters(bookTitle);
+                
+                if (bookInfo && bookInfo.chapters && bookInfo.chapters.length > 0) {
+                  addBook({
+                    title: bookTitle,
+                    chapters: bookInfo.chapters,
+                    completedChapters: [],
+                    author: bookInfo.author || null,
+                    summary: bookInfo.summary || null
+                  });
+                  setBookTitle('');
+                  if (addButton) addButton.textContent = originalText;
+                  alert(`✅ Added "${bookTitle}" with ${bookInfo.chapters.length} chapters!`);
+                } else {
+                  // If we can't fetch chapters, create a manual entry with generic chapters
+                  const manualChapters = Array.from({length: parseInt(bookChapter) || 10}, (_, i) => ({
+                    number: i + 1,
+                    title: `Chapter ${i + 1}`,
+                    summary: null
+                  }));
+                  
+                  addBook({
+                    title: bookTitle,
+                    chapters: manualChapters,
+                    completedChapters: [],
+                    author: null,
+                    summary: null,
+                    manualEntry: true
+                  });
+                  setBookTitle('');
+                  setBookChapter('');
+                  if (addButton) addButton.textContent = originalText;
+                  alert(`✅ Added "${bookTitle}". Mark chapters as complete as you read!`);
+                }
+              } catch (error) {
+                console.error('Error adding book:', error);
+                if (addButton) addButton.textContent = originalText;
+                alert('❌ Could not fetch book info. Please try again or contact support.');
+              }
+            };
+
+            // Fetch book chapter information from Google Books API
+            const fetchBookChapters = async (bookTitle) => {
+              console.log('=== FETCHING BOOK INFO ===');
+              console.log('Book title:', bookTitle);
+              
+              try {
+                // Google Books API
+                const searchUrl = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(bookTitle)}&maxResults=1`;
+                console.log('Calling Google Books API...');
+                
+                const response = await fetch(searchUrl);
+                const data = await response.json();
+                
+                if (!data.items || data.items.length === 0) {
+                  console.log('No results from Google Books');
+                  return null;
+                }
+                
+                const book = data.items[0].volumeInfo;
+                console.log('Found book:', book.title);
+                console.log('Has description?', !!book.description);
+                
+                // Try to extract chapter info from description
+                const chapters = extractChaptersFromDescription(book.description, bookTitle);
+                
+                // If we found chapters in description, use them
+                if (chapters.length > 0) {
+                  console.log('Extracted chapters from description:', chapters.length);
+                  return {
+                    chapters: chapters,
+                    author: book.authors ? book.authors.join(', ') : null,
+                    summary: book.description?.substring(0, 500)
+                  };
+                }
+                
+                // Fallback: Try to get table of contents from searchInfo
+                if (book.searchInfo?.textSnippet) {
+                  const tocChapters = extractChaptersFromSnippet(book.searchInfo.textSnippet);
+                  if (tocChapters.length > 0) {
+                    console.log('Extracted chapters from snippet:', tocChapters.length);
+                    return {
+                      chapters: tocChapters,
+                      author: book.authors ? book.authors.join(', ') : null,
+                      summary: book.description?.substring(0, 500)
+                    };
+                  }
+                }
+                
+                // If no chapters found but we have the book, return basic info
+                console.log('Book found but no chapter data available');
+                return {
+                  chapters: [], // Will trigger manual entry
+                  author: book.authors ? book.authors.join(', ') : null,
+                  summary: book.description?.substring(0, 500)
+                };
+                
+              } catch (error) {
+                console.error('Google Books API error:', error);
+                
+                // Try SparkNotes as backup
+                try {
+                  console.log('Trying SparkNotes...');
+                  const chapters = await fetchFromSparkNotes(bookTitle);
+                  if (chapters && chapters.length > 0) {
+                    return { chapters, author: null, summary: null };
+                  }
+                } catch (sparkError) {
+                  console.error('SparkNotes error:', sparkError);
+                }
+                
+                return null;
+              }
+            };
+
+            const extractChaptersFromDescription = (description, bookTitle) => {
+              if (!description) return [];
+              
+              const chapters = [];
+              
+              // Look for chapter patterns
+              const patterns = [
+                /Chapter (\d+):?\s*([^\n.]+)/gi,
+                /(\d+)\.\s+([^\n.]+)/g,
+                /Part (\d+):?\s*([^\n.]+)/gi
+              ];
+              
+              for (const pattern of patterns) {
+                const matches = [...description.matchAll(pattern)];
+                if (matches.length >= 3) { // Need at least 3 chapters to be confident
+                  matches.forEach((match, idx) => {
+                    if (idx < 20) { // Max 20 chapters
+                      chapters.push({
+                        number: parseInt(match[1]) || idx + 1,
+                        title: match[2].trim(),
+                        summary: null // Google Books doesn't give us chapter summaries :(
+                      });
+                    }
+                  });
+                  break;
+                }
+              }
+              
+              return chapters;
+            };
+
+            const extractChaptersFromSnippet = (snippet) => {
+              if (!snippet) return [];
+              return extractChaptersFromDescription(snippet);
+            };
+
+            // Fetch from SparkNotes (if available)
+            const fetchFromSparkNotes = async (bookTitle) => {
+              // SparkNotes URL format: sparknotes.com/lit/{book-slug}
+              const slug = bookTitle.toLowerCase().replace(/[^a-z0-9]+/g, '');
+              const url = `https://www.sparknotes.com/lit/${slug}/`;
+              
+              try {
+                // Note: This will likely be blocked by CORS, but worth trying
+                const response = await fetch(url);
+                if (response.ok) {
+                  const html = await response.text();
+                  // Would need to parse HTML to extract chapter summaries
+                  // This is complex and likely blocked by CORS anyway
+                  return [];
+                }
+              } catch (e) {
+                console.log('SparkNotes not accessible via direct fetch');
+              }
+              
+              return [];
+            };
+
+            const handleUrlBlur = async () => {
+              if (!articleUrl || articleTitle) return; // Don't overwrite a title the user already typed
+              try {
+                const res = await fetch(`https://r.jina.ai/${articleUrl}`);
+                if (!res.ok) return;
+                const text = await res.text();
+                // Jina returns markdown — the first line is usually "Title: ..."
+                const titleMatch = text.match(/^Title:\s*(.+)$/m);
+                if (titleMatch) setArticleTitle(titleMatch[1].trim());
+                // Also pre-fill the article text so user can see it was fetched
+                setArticleText(text);
+              } catch (e) {
+                console.log('Could not pre-fetch title:', e.message);
+              }
+            };
+
+            const handleAddArticle = async () => {
+              if (!articleUrl && !articleText) {
+                alert('Please provide a URL or paste the article text');
+                return;
+              }
+
+              const addButton = document.querySelector('button.add-article-btn');
+              if (addButton) { addButton.textContent = 'Fetching…'; addButton.disabled = true; }
+
+              let finalText = articleText;
+              let finalTitle = articleTitle;
+
+              // If we have a URL but no text yet, fetch now
+              if (articleUrl && !articleText) {
+                try {
+                  const res = await fetch(`https://r.jina.ai/${articleUrl}`);
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                  finalText = await res.text();
+
+                  // Auto-extract title if still missing
+                  if (!finalTitle) {
+                    const titleMatch = finalText.match(/^Title:\s*(.+)$/m);
+                    if (titleMatch) finalTitle = titleMatch[1].trim();
+                  }
+                } catch (err) {
+                  if (addButton) { addButton.textContent = 'Add Article'; addButton.disabled = false; }
+                  alert(`❌ Could not fetch article (${err.message}). Please paste the text manually.`);
+                  return;
+                }
+              }
+
+              if (!finalText || finalText.trim().length < 80) {
+                if (addButton) { addButton.textContent = 'Add Article'; addButton.disabled = false; }
+                alert('❌ Article content is too short to quiz on. Please paste more of the article text.');
+                return;
+              }
+
+              if (!finalTitle) finalTitle = articleUrl || 'Untitled Article';
+
+              addArticle({
+                title: finalTitle,
+                url: articleUrl || null,
+                text: finalText,
+                source: articleUrl ? new URL(articleUrl).hostname.replace('www.', '') : 'Pasted text'
+              });
+
+              setArticleTitle('');
+              setArticleUrl('');
+              setArticleText('');
+              if (addButton) { addButton.textContent = 'Add Article'; addButton.disabled = false; }
+              alert(`✅ "${finalTitle}" added (${finalText.length.toLocaleString()} characters). Ready to quiz!`);
+            };
+
+            return (
+              <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-6">
+                <div className="max-w-2xl mx-auto">
+                  <button
+                    onClick={() => setView('home')}
+                    className="mb-6 text-indigo-600 hover:text-indigo-800 font-semibold"
+                  >
+                    ← Back to Home
+                  </button>
+
+                  <h2 className="text-3xl font-bold text-gray-800 mb-6">Add Content</h2>
+
+                  <div className="flex gap-2 mb-6">
+                    <button
+                      onClick={() => setContentType('book')}
+                      className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${
+                        contentType === 'book'
+                          ? 'bg-indigo-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <BookOpen className="inline mr-2" size={20} />
+                      Book
+                    </button>
+                    <button
+                      onClick={() => setContentType('article')}
+                      className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${
+                        contentType === 'article'
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <FileText className="inline mr-2" size={20} />
+                      Article
+                    </button>
+                  </div>
+
+                  {contentType === 'book' && (
+                    <div className="bg-white rounded-xl p-6 shadow-sm space-y-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Book Title
+                        </label>
+                        <input
+                          type="text"
+                          value={bookTitle}
+                          onChange={(e) => setBookTitle(e.target.value)}
+                          placeholder="The Defining Decade"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Number of Chapters (if we can't find it automatically)
+                        </label>
+                        <input
+                          type="number"
+                          value={bookChapter}
+                          onChange={(e) => setBookChapter(e.target.value)}
+                          placeholder="10"
+                          min="1"
+                          max="50"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <button
+                        onClick={handleAddBook}
+                        className="add-book-btn w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-all"
+                      >
+                        Add Book
+                      </button>
+
+                      <div className="mt-4 p-4 bg-indigo-50 rounded-lg">
+                        <p className="text-sm text-indigo-800">
+                          <strong>How it works:</strong> We'll try to fetch chapter info from Wikipedia. 
+                          Then you can mark chapters as complete as you read them, and take quizzes on completed chapters!
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {contentType === 'article' && (
+                    <div className="bg-white rounded-xl p-6 shadow-sm space-y-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Article URL
+                        </label>
+                        <input
+                          type="url"
+                          value={articleUrl}
+                          onChange={(e) => setArticleUrl(e.target.value)}
+                          onBlur={handleUrlBlur}
+                          placeholder="https://example.com/article"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Paste the URL — title and content will be fetched automatically when you click away.</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Title <span className="font-normal text-gray-400">(auto-filled from URL)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={articleTitle}
+                          onChange={(e) => setArticleTitle(e.target.value)}
+                          placeholder="Fetching title automatically..."
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Article Text <span className="font-normal text-gray-400">(auto-filled, or paste manually for paywalled articles)</span>
+                        </label>
+                        <textarea
+                          value={articleText}
+                          onChange={(e) => setArticleText(e.target.value)}
+                          placeholder="Text fetched automatically from URL. For paywalled articles, paste the full text here instead."
+                          rows={6}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y text-sm"
+                        />
+                        {articleText && (
+                          <p className="text-xs text-green-600 mt-1">✓ {articleText.length.toLocaleString()} characters ready to quiz on</p>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={handleAddArticle}
+                        className="add-article-btn w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all"
+                      >
+                        Add Article
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          };
+
+          // Quiz View
+          const QuizView = () => {
+            if (!currentQuiz) return null;
+
+            const currentQ = currentQuiz.questions[currentQuiz.currentQuestion];
+            const progress = ((currentQuiz.currentQuestion + 1) / currentQuiz.questions.length) * 100;
+
+            if (currentQuiz.completed) {
+              return (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-6 flex items-center justify-center">
+                  <div className="max-w-md w-full bg-white rounded-2xl p-8 shadow-xl">
+                    <div className="text-center mb-6">
+                      <div className="inline-block p-4 bg-green-100 rounded-full mb-4">
+                        <Trophy className="text-green-600" size={48} />
+                      </div>
+                      <h2 className="text-3xl font-bold text-gray-800 mb-2">Quiz Complete!</h2>
+                      <p className="text-gray-600">{currentQuiz.title}</p>
+                    </div>
+
+                    <div className="space-y-4 mb-6">
+                      <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-700 font-semibold">Score</span>
+                        <span className="text-2xl font-bold text-indigo-600">
+                          {currentQuiz.percentCorrect}%
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
+                        <span className="text-gray-700 font-semibold">Correct Answers</span>
+                        <span className="text-xl font-bold text-gray-800">
+                          {currentQuiz.correctAnswers} / {currentQuiz.questions.length}
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center p-4 bg-yellow-50 rounded-lg">
+                        <span className="text-gray-700 font-semibold">Points Earned</span>
+                        <span className="text-xl font-bold text-yellow-600">
+                          +{currentQuiz.pointsEarned}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setCurrentQuiz(null);
+                        setView('home');
+                      }}
+                      className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-all"
+                    >
+                      Back to Home
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-6">
+                <div className="max-w-2xl mx-auto">
+                  {/* Warning if using fallback */}
+                  {currentQuiz.usingFallback && (
+                    <div className="mb-4 p-4 bg-yellow-50 border-2 border-yellow-200 rounded-lg">
+                      <p className="text-sm text-yellow-800">
+                        <strong>⚠️ Using Generic Questions:</strong> Unable to generate content-specific questions. 
+                        Check browser console (F12) for error details.
+                      </p>
+                    </div>
+                  )}
+                  
+                  <div className="mb-6">
+                    <div className="flex justify-between text-sm text-gray-600 mb-2">
+                      <span>Question {currentQuiz.currentQuestion + 1} of {currentQuiz.questions.length}</span>
+                      <span>{Math.round(progress)}% Complete</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-8 shadow-lg mb-6">
+                    <p className="text-sm text-indigo-600 font-semibold mb-2">
+                      {currentQuiz.type === 'book' ? '📚 Book' : '📄 Article'}: {currentQuiz.title}
+                    </p>
+                    <h3 className="text-2xl font-bold text-gray-800 mb-6">
+                      {currentQ.question}
+                    </h3>
+
+                    <div className="space-y-3">
+                      {currentQ.options.map((option, index) => (
+                        <button
+                          key={index}
+                          onClick={() => submitAnswer(index)}
+                          className="w-full text-left p-4 border-2 border-gray-200 rounded-xl hover:border-indigo-600 hover:bg-indigo-50 transition-all font-medium text-gray-700"
+                        >
+                          <span className="inline-block w-8 h-8 bg-gray-100 rounded-full text-center leading-8 mr-3 font-semibold">
+                            {String.fromCharCode(65 + index)}
+                          </span>
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="text-center text-gray-600">
+                    <Flame className="inline text-orange-500 mr-2" size={20} />
+                    <span className="font-semibold">{streak} day streak</span> - Keep it going!
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          // Stats View
+          const StatsView = () => {
+            const clearAllData = () => {
+              if (confirm('Are you sure you want to clear all data? This will delete all books, articles, quizzes, and your streak. This cannot be undone.')) {
+                localStorage.clear();
+                setBooks([]);
+                setArticles([]);
+                setQuizHistory([]);
+                setStreak(0);
+                setScore(0);
+                setLastQuizDate(null);
+                alert('All data cleared! Starting fresh.');
+                setView('home');
+              }
+            };
+
+            return (
+            <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-6">
+              <div className="max-w-2xl mx-auto">
+                <button
+                  onClick={() => setView('home')}
+                  className="mb-6 text-indigo-600 hover:text-indigo-800 font-semibold"
+                >
+                  ← Back to Home
+                </button>
+
+                <h2 className="text-3xl font-bold text-gray-800 mb-6">Your Progress</h2>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-white rounded-xl p-6 shadow-sm">
+                    <p className="text-sm text-gray-600 mb-1">Average Score</p>
+                    <p className="text-3xl font-bold text-indigo-600">
+                      {quizHistory.length > 0
+                        ? Math.round(quizHistory.reduce((acc, q) => acc + q.score, 0) / quizHistory.length)
+                        : 0}%
+                    </p>
+                  </div>
+                  
+                  <div className="bg-white rounded-xl p-6 shadow-sm">
+                    <p className="text-sm text-gray-600 mb-1">Best Streak</p>
+                    <p className="text-3xl font-bold text-orange-500">{streak} days</p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
+                  <h3 className="text-xl font-bold text-gray-800 mb-4">Recent Quizzes</h3>
+                  
+                  {quizHistory.length === 0 ? (
+                    <p className="text-gray-600 text-center py-8">
+                      No quizzes yet. Start your first one!
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {quizHistory.map((quiz, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                        >
+                          <div>
+                            <p className="font-semibold text-gray-800">{quiz.title}</p>
+                            <p className="text-sm text-gray-600">{quiz.date}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-2xl font-bold text-indigo-600">{quiz.score}%</p>
+                            <p className="text-sm text-gray-600">
+                              {quiz.correct}/{quiz.total}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Clear Data Button */}
+                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-6">
+                  <h3 className="text-lg font-bold text-gray-800 mb-2">Reset App</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Clear all saved data including books, articles, quizzes, and streak. 
+                    Useful for testing or starting fresh.
+                  </p>
+                  <button
+                    onClick={clearAllData}
+                    className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-all"
+                  >
+                    Clear All Data
+                  </button>
+                </div>
+              </div>
+            </div>
+          );};
+
+          return (
+            <>
+              {view === 'home' && <HomeView />}
+              {view === 'addContent' && <AddContentView />}
+              {view === 'loading' && (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-50 p-6 flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="inline-block p-6 bg-white rounded-full shadow-lg mb-4 animate-pulse">
+                      <Target className="text-indigo-600" size={48} />
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Generating Your Quiz...</h2>
+                    <p className="text-gray-600">Reading the content and creating questions</p>
+                  </div>
+                </div>
+              )}
+              {view === 'quiz' && <QuizView />}
+              {view === 'stats' && <StatsView />}
+            </>
+          );
+        };
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<RetentionApp />);
+    </script>
+</body>
+</html>
